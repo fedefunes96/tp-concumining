@@ -4,17 +4,27 @@ use std::thread;
 
 static NTHREADS: i32 = 5;
 
+struct ExtraMessage {
+    val: i32,
+}
+
+struct Message<'a> {
+    id: usize,
+    msg: &'a str,
+    extra: Option<ExtraMessage>,
+}
+
 fn main() {
     let mut miners = Vec::new();
     let mut receivers = Vec::new();
     let mut senders = Vec::new();
 
     //Canal de comunicacion del lider
-    let (leader_tx, leader_rx): (Sender<i32>, Receiver<i32>) = mpsc::channel();
+    let (leader_tx, leader_rx): (Sender<Message>, Receiver<Message>) = mpsc::channel();
 
     //Creamos los canales de cada minero
     for _ in 0..NTHREADS {
-        let (tx, rx): (Sender<i32>, Receiver<i32>) = mpsc::channel();
+        let (tx, rx): (Sender<Message>, Receiver<Message>) = mpsc::channel();
 
         senders.push(tx);
         receivers.push(rx);
@@ -35,35 +45,42 @@ fn main() {
 
         let miner = thread::spawn(move || {
             //Enviamos un mensaje al siguiente minero en la lista
-            other_miners[(id % (NTHREADS - 1)) as usize].send(id).unwrap();
+            let next_miner = (id % (NTHREADS - 1)) as usize;
+            
+            let send_msg = Message { id: id as usize, msg: "Pepitas", extra: None };
+            
+            println!("Miner {} sent message {} to {}", id, send_msg.msg, (id + 1) % (NTHREADS));
 
-            println!("Miner {} sent value {} to {}", id, id, (id + 1) % (NTHREADS));
+            other_miners[next_miner].send(send_msg).unwrap();
+
+            let send_msg = Message { id: id as usize, msg: "Pepitas", extra: None };
+            
+            println!("Miner {} sent message {} to Leader", id, send_msg.msg);
 
             //Enviamos un mensaje al leader
-            leader.send(id).unwrap();
+            leader.send(send_msg).unwrap();
 
-            println!("Miner {} sent value {} to Leader(id = 500)", id, id);
+            let mut recv_msg = rx.recv().unwrap();
 
-            let mut val = rx.recv().unwrap();
+            println!("Miner {} received message from {} saying {}", id, recv_msg.id, recv_msg.msg);
 
-            println!("Miner {} received message from {}", id, val);
+            recv_msg = rx.recv().unwrap();
 
-            val = rx.recv().unwrap();
-
-            println!("Miner {} received message from {}", id, val);
+            println!("Miner {} received message from {} saying {}", id, recv_msg.id, recv_msg.msg);
         });
 
         miners.push(miner);
     }
 
     for id in 0..NTHREADS {
-        senders[id as usize].send(500).unwrap();
+        let send_msg = Message { id: id as usize, msg: "Soy el lider", extra: None };
+        senders[id as usize].send(send_msg).unwrap();
     }
 
     for _ in 0..NTHREADS {
-        let val = leader_rx.recv().unwrap();
+        let recv_msg = leader_rx.recv().unwrap();
 
-        println!("Leader received message from {}", val);
+        println!("Leader received message from {} saying {}", recv_msg.id, recv_msg.msg);
     }    
     
     for miner in miners {
