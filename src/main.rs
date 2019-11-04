@@ -2,16 +2,21 @@ use std::sync::mpsc::{Sender, Receiver};
 use std::sync::mpsc;
 use std::thread;
 
-static TOTAL_MINERS: i32 = 5;
-static N_REGIONS: i32 = 5;
+static TOTAL_MINERS: usize = 5;
+static N_REGIONS: usize = 5;
+static LEADER_ID: usize = TOTAL_MINERS + 1;
+
+enum Commands {
+    EXPLORE,
+}
 
 struct ExtraOpt {
     val: i32,
 }
 
-struct Message<'a> {
+struct Message {
     id: usize,
-    msg: &'a str,
+    cmd: Commands,
     extra: Option<ExtraOpt>,
 }
 
@@ -39,7 +44,7 @@ fn main() {
         let leader = leader_tx.clone();
 
         //Eliminamos a este minero de la lista de otros mineros
-        other_miners.remove(id as usize);
+        other_miners.remove(id);
 
         //Eliminamos el lado para recibir del canal de la lista, es unidireccional
         let rx = receivers.remove(0);
@@ -59,48 +64,42 @@ fn main() {
 }
 
 fn miner_loop(
-    id: i32,
+    id: usize,
     other_miners: Vec<Sender<Message>>,
     rx: Receiver<Message>,
     leader_tx: Sender<Message>) {
 
-    let next_miner = (id % (TOTAL_MINERS - 1)) as usize;
-            
-    let send_msg = Message { id: id as usize, msg: "Pepitas", extra: None };
-            
-    println!("Miner {} sent message {} to {}", id, send_msg.msg, (id + 1) % (TOTAL_MINERS));
+    loop {
+        //Esperamos recibir un mensaje para operar
+        let mut recv_msg = rx.recv().unwrap();
 
-    other_miners[next_miner].send(send_msg).unwrap();
+        match recv_msg.cmd {
+            Commands::EXPLORE => {
+                println!("Miner {} was sent to explore a region", id);
+            }
+        }
 
-    let send_msg = Message { id: id as usize, msg: "Pepitas", extra: None };
-            
-    println!("Miner {} sent message {} to Leader", id, send_msg.msg);
-
-    //Enviamos un mensaje al leader
-    leader_tx.send(send_msg).unwrap();
-
-    let mut recv_msg = rx.recv().unwrap();
-
-    println!("Miner {} received message from {} saying {}", id, recv_msg.id, recv_msg.msg);
-
-    recv_msg = rx.recv().unwrap();
-
-    println!("Miner {} received message from {} saying {}", id, recv_msg.id, recv_msg.msg);
+        break;
+    }
 }
 
 fn leader_loop(
     leader_rx: Receiver<Message>,
     senders: Vec<Sender<Message>>,
     ) {
-    
-    for id in 0..TOTAL_MINERS {
-        let send_msg = Message { id: id as usize, msg: "Soy el lider", extra: None };
-        senders[id as usize].send(send_msg).unwrap();
-    }
 
-    for _ in 0..TOTAL_MINERS {
-        let recv_msg = leader_rx.recv().unwrap();
+    for _ in 0..N_REGIONS {
+        //Empieza una ronda nueva
+        for miner_tx in &senders {
+            let send_msg = Message {
+                id: LEADER_ID,
+                cmd: Commands::EXPLORE,
+                extra: None
+            };
 
-        println!("Leader received message from {} saying {}", recv_msg.id, recv_msg.msg);
-    }    
+            miner_tx.send(send_msg).unwrap();
+        }
+
+        break;
+    }  
 }
