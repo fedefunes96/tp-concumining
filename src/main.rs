@@ -1,13 +1,19 @@
+mod miner;
+
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::mpsc;
 use std::thread;
+use std::time;
 
 static TOTAL_MINERS: usize = 5;
 static N_REGIONS: usize = 5;
 static LEADER_ID: usize = TOTAL_MINERS + 1;
 
+#[derive(Clone)]
 enum Commands {
     EXPLORE,
+    RETURN,
+    STOP
 }
 
 struct ExtraOpt {
@@ -69,6 +75,8 @@ fn miner_loop(
     rx: Receiver<Message>,
     leader_tx: Sender<Message>) {
 
+    let mut gold_pips = 0;
+
     loop {
         //Esperamos recibir un mensaje para operar
         let mut recv_msg = rx.recv().unwrap();
@@ -76,10 +84,18 @@ fn miner_loop(
         match recv_msg.cmd {
             Commands::EXPLORE => {
                 println!("Miner {} was sent to explore a region", id);
+
+                gold_pips = miner::explore();
+            },
+            Commands::RETURN => {
+                println!("Miner {} returned with {} gold pips", id, gold_pips);
+            },
+            Commands::STOP => {
+                break;
             }
         }
 
-        break;
+        //break;
     }
 }
 
@@ -90,16 +106,32 @@ fn leader_loop(
 
     for _ in 0..N_REGIONS {
         //Empieza una ronda nueva
-        for miner_tx in &senders {
-            let send_msg = Message {
-                id: LEADER_ID,
-                cmd: Commands::EXPLORE,
-                extra: None
-            };
 
-            miner_tx.send(send_msg).unwrap();
-        }
+        //Ordenamos a los mineros a explorar
+        give_orders(&senders, Commands::EXPLORE);
 
+        //Esperamos 2 segundos para dar la orden de regreso
+        //thread::sleep(time::Duration::from_millis(2000));
+
+        //Ordenamos a los mineros a volver
+        give_orders(&senders, Commands::RETURN);
+
+        //Finalizamos limpiamente
+        give_orders(&senders, Commands::STOP);
         break;
     }  
+}
+
+fn give_orders(senders: &Vec<Sender<Message>>, command: Commands) {
+    for miner_tx in senders {
+        let cmd = command.clone();
+
+        let send_msg = Message {
+            id: LEADER_ID,
+            cmd: cmd,
+            extra: None
+        };
+
+        miner_tx.send(send_msg).unwrap();
+    }    
 }
