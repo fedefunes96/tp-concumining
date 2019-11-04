@@ -40,14 +40,16 @@ fn main() {
         receivers.push(rx);
     }
 
-    let barrier = Arc::new(Barrier::new(TOTAL_MINERS));
+    let barrier_return = Arc::new(Barrier::new(TOTAL_MINERS));
+    let barrier_tell = Arc::new(Barrier::new(TOTAL_MINERS + 1));
 
     for id in 0..TOTAL_MINERS {
         //Clonamos para poder transmitir a otros mineros
         let mut other_miners = senders.clone();
         
-        //Clonamos la barrera
-        let barrier_miner = barrier.clone();
+        //Clonamos las barreras
+        let barrier_miner_return = barrier_return.clone();
+        let barrier_miner_tell = barrier_tell.clone();
 
         //Clonamos para poder transmitir al lider
         let leader = leader_tx.clone();
@@ -59,13 +61,20 @@ fn main() {
         let rx = receivers.remove(0);
 
         let miner = thread::spawn(move || {
-            miner_loop(id, other_miners, rx, leader, barrier_miner);
+            miner_loop(
+                id, 
+                other_miners,
+                rx,
+                leader,
+                barrier_miner_return,
+                barrier_miner_tell
+            );
         });
 
         miners.push(miner);
     }
 
-    leader_loop(leader_rx, senders);
+    leader_loop(leader_rx, senders, barrier_tell);
   
     for miner in miners {
         miner.join().expect("Miner panic");
@@ -77,10 +86,12 @@ fn miner_loop(
     other_miners: Vec<Sender<Message>>,
     rx: Receiver<Message>,
     leader_tx: Sender<Message>,
-    barrier: Arc<Barrier>
+    barrier_return: Arc<Barrier>,
+    barrier_tell: Arc<Barrier>
     ) {
 
     let mut gold_pips = 0;
+    let mut counter_told = 0;
 
     loop {
         //Esperamos recibir un mensaje para operar
@@ -96,7 +107,7 @@ fn miner_loop(
                 println!("Miner {} returned with {} gold pips", id, gold_pips);
 
                 //Esperamos a que los demas mineros vuelvan
-                barrier.wait();
+                barrier_return.wait();
                 
                 for miner in &other_miners {
                     let send_msg = Message {
@@ -110,6 +121,16 @@ fn miner_loop(
             },
             Commands::TELL => {
                 println!("Miner {} was told by Miner {} that this mined {} gold pips", id, recv_msg.id, recv_msg.extra.unwrap());
+
+                counter_told += 1;
+
+                if counter_told == TOTAL_MINERS - 1 {
+                    //Esperamos a que todos (incluyendo el lider) sepan la cantidad de
+                    //pepitas de oro que minó cada minero
+                    barrier_tell.wait();           
+
+                    counter_told = 0;
+                }
             },
             Commands::STOP => {
                 break;
@@ -123,6 +144,7 @@ fn miner_loop(
 fn leader_loop(
     leader_rx: Receiver<Message>,
     senders: Vec<Sender<Message>>,
+    barrier_tell: Arc<Barrier>
     ) {
 
     for _ in 0..N_REGIONS {
@@ -137,13 +159,10 @@ fn leader_loop(
         //Ordenamos a los mineros a volver
         give_orders(&senders, Commands::RETURN);
 
-        
-        //Temporalmente un sleep para prevenir interseccion de mensajes
-        thread::sleep(time::Duration::from_millis(5000));
-        //Finalizamos limpiamente
-        give_orders(&senders, Commands::STOP);
-        break;
+        barrier_tell.wait();
     }  
+
+    give_orders(&senders, Commands::STOP);
 }
 
 fn give_orders(senders: &Vec<Sender<Message>>, command: Commands) {
