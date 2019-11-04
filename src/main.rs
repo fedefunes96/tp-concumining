@@ -111,7 +111,7 @@ fn leader_loop(
         give_orders(&senders, Commands::EXPLORE);
 
         //Esperamos 2 segundos para dar la orden de regreso
-        //thread::sleep(time::Duration::from_millis(2000));
+        thread::sleep(time::Duration::from_millis(2000));
 
         //Ordenamos a los mineros a volver
         give_orders(&senders, Commands::RETURN);
