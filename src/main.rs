@@ -2,6 +2,7 @@ mod miner;
 
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::mpsc;
+use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time;
 
@@ -13,17 +14,14 @@ static LEADER_ID: usize = TOTAL_MINERS + 1;
 enum Commands {
     EXPLORE,
     RETURN,
-    STOP
-}
-
-struct ExtraOpt {
-    val: i32,
+    STOP,
+    TELL
 }
 
 struct Message {
     id: usize,
     cmd: Commands,
-    extra: Option<ExtraOpt>,
+    extra: Option<i32>,
 }
 
 fn main() {
@@ -42,9 +40,14 @@ fn main() {
         receivers.push(rx);
     }
 
+    let barrier = Arc::new(Barrier::new(TOTAL_MINERS));
+
     for id in 0..TOTAL_MINERS {
         //Clonamos para poder transmitir a otros mineros
         let mut other_miners = senders.clone();
+        
+        //Clonamos la barrera
+        let barrier_miner = barrier.clone();
 
         //Clonamos para poder transmitir al lider
         let leader = leader_tx.clone();
@@ -56,7 +59,7 @@ fn main() {
         let rx = receivers.remove(0);
 
         let miner = thread::spawn(move || {
-            miner_loop(id, other_miners, rx, leader);
+            miner_loop(id, other_miners, rx, leader, barrier_miner);
         });
 
         miners.push(miner);
@@ -73,13 +76,15 @@ fn miner_loop(
     id: usize,
     other_miners: Vec<Sender<Message>>,
     rx: Receiver<Message>,
-    leader_tx: Sender<Message>) {
+    leader_tx: Sender<Message>,
+    barrier: Arc<Barrier>
+    ) {
 
     let mut gold_pips = 0;
 
     loop {
         //Esperamos recibir un mensaje para operar
-        let mut recv_msg = rx.recv().unwrap();
+        let recv_msg = rx.recv().unwrap();
 
         match recv_msg.cmd {
             Commands::EXPLORE => {
@@ -89,6 +94,22 @@ fn miner_loop(
             },
             Commands::RETURN => {
                 println!("Miner {} returned with {} gold pips", id, gold_pips);
+
+                //Esperamos a que los demas mineros vuelvan
+                barrier.wait();
+                
+                for miner in &other_miners {
+                    let send_msg = Message {
+                        id: id,
+                        cmd: Commands::TELL,
+                        extra: Some(gold_pips.clone())
+                    };
+
+                    miner.send(send_msg).unwrap();
+                }
+            },
+            Commands::TELL => {
+                println!("Miner {} was told by Miner {} that this mined {} gold pips", id, recv_msg.id, recv_msg.extra.unwrap());
             },
             Commands::STOP => {
                 break;
@@ -116,6 +137,9 @@ fn leader_loop(
         //Ordenamos a los mineros a volver
         give_orders(&senders, Commands::RETURN);
 
+        
+        //Temporalmente un sleep para prevenir interseccion de mensajes
+        thread::sleep(time::Duration::from_millis(5000));
         //Finalizamos limpiamente
         give_orders(&senders, Commands::STOP);
         break;
