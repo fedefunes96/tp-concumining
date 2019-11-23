@@ -69,10 +69,8 @@ impl Concumining {
 
             //Eliminamos el lado para recibir del canal de la lista, es unidireccional
             let rx = receivers.remove(0);
-            let total_miners = self.total_miners;
             let miner = thread::spawn(move || {
                 miner_loop(
-                    total_miners,
                     id, 
                     &mut other_miners,
                     rx,
@@ -87,7 +85,7 @@ impl Concumining {
 
         }
 
-        self.leader_loop(self.total_miners, self.rounds, leader_rx, &mut senders, condvar_listen, condvar_transfer);
+        self.leader_loop(leader_rx, &mut senders, condvar_listen, condvar_transfer);
     
         for miner in miners {
             miner.join().expect("Miner panic");
@@ -95,23 +93,21 @@ impl Concumining {
     }
 
     fn leader_loop(&self,
-        total_miners: usize,
-        rounds: usize,
         leader_rx: Receiver<Message>,
         senders: &mut HashMap<usize, Sender<Message>>,
         condvar_listen: Arc<(Mutex<usize>, Condvar)>,
         condvar_transfer: Arc<(Mutex<usize>, Condvar)>
     ) {
-
+        let leader_id = self.total_miners + 1;
         let mut miners_gold_pips = HashMap::new();
         let mut last_all_ready1 = 0;
         let mut last_all_ready2 = 0;
 
-        for miner_id in 0..total_miners {
+        for miner_id in 0..self.total_miners {
             miners_gold_pips.insert(miner_id, 0);
         }
 
-        for _ in 0..rounds {
+        for _ in 0..self.rounds {
             //Empieza una ronda nueva
             println!("Total miners {}", senders.len());
             
@@ -120,13 +116,13 @@ impl Concumining {
                 break;
             }
             //Ordenamos a los mineros a explorar
-            self.give_orders(total_miners + 1, &senders, Commands::EXPLORE);
+            self.give_orders(leader_id, &senders, Commands::EXPLORE);
 
             //Esperamos 2 segundos para dar la orden de regreso
             thread::sleep(time::Duration::from_millis(2000));
 
             //Ordenamos a los mineros a volver
-            self.give_orders(total_miners + 1, &senders, Commands::RETURN);
+            self.give_orders(leader_id, &senders, Commands::RETURN);
 
             wait(senders.len() + 1 + last_all_ready1, &condvar_listen);
 
@@ -151,7 +147,7 @@ impl Concumining {
             last_all_ready2 += senders.len() + 1;
         }  
 
-        self.give_orders(total_miners + 1, &senders, Commands::STOP);
+        self.give_orders(leader_id, &senders, Commands::STOP);
     }
 
     fn give_orders(&self, leader_id: usize, senders: &HashMap<usize, Sender<Message>>, command: Commands) {
@@ -207,7 +203,6 @@ impl Concumining {
         return best_miners;
     }
     fn miner_loop(
-        total_miners: usize,
         id: usize,
         other_miners: &mut HashMap<usize, Sender<Message>>,
         rx: Receiver<Message>,
@@ -216,6 +211,7 @@ impl Concumining {
         condvar_listen: Arc<(Mutex<usize>, Condvar)>,
         condvar_transfer: Arc<(Mutex<usize>, Condvar)>
     ) {
+        let total_miners : usize = other_miners.len() + 1;
         let mut counter_told = 0;
         let mut total_gold_pips = 0;
         let mut last_miners_ready = 0;
