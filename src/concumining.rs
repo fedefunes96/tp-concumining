@@ -167,175 +167,175 @@ impl Concumining {
 
 }
 
-    fn get_worst_miners(miners_gold_pips: &HashMap<usize, i32>) -> Vec<usize> {
-        let mut worst_miners: Vec<usize> = Vec::new();
+fn get_worst_miners(miners_gold_pips: &HashMap<usize, i32>) -> Vec<usize> {
+    let mut worst_miners: Vec<usize> = Vec::new();
 
-        let mut worst_pips = 9999;
+    let mut worst_pips = 9999;
 
-        for (miner_id, gold_pips) in miners_gold_pips.iter() {
-            if *gold_pips < worst_pips {
-                worst_pips = *gold_pips;
-                worst_miners.clear();
-                worst_miners.push(*miner_id);
-            } else if *gold_pips == worst_pips {
-                worst_miners.push(*miner_id);
-            }
+    for (miner_id, gold_pips) in miners_gold_pips.iter() {
+        if *gold_pips < worst_pips {
+            worst_pips = *gold_pips;
+            worst_miners.clear();
+            worst_miners.push(*miner_id);
+        } else if *gold_pips == worst_pips {
+            worst_miners.push(*miner_id);
         }
-
-        return worst_miners;
     }
 
-    fn get_best_miners(miners_gold_pips: &HashMap<usize, i32>) -> Vec<usize> {
-        let mut best_miners: Vec<usize> = Vec::new();
+    return worst_miners;
+}
 
-        let mut best_pips = 0;
+fn get_best_miners(miners_gold_pips: &HashMap<usize, i32>) -> Vec<usize> {
+    let mut best_miners: Vec<usize> = Vec::new();
 
-        for (miner_id, gold_pips) in miners_gold_pips.iter() {
-            if *gold_pips > best_pips {
-                best_pips = *gold_pips;
-                best_miners.clear();
-                best_miners.push(*miner_id);
-            } else if *gold_pips == best_pips {
-                best_miners.push(*miner_id);
-            }
+    let mut best_pips = 0;
+
+    for (miner_id, gold_pips) in miners_gold_pips.iter() {
+        if *gold_pips > best_pips {
+            best_pips = *gold_pips;
+            best_miners.clear();
+            best_miners.push(*miner_id);
+        } else if *gold_pips == best_pips {
+            best_miners.push(*miner_id);
         }
-
-        return best_miners;
     }
-    fn miner_loop(
-        id: usize,
-        other_miners: &mut HashMap<usize, Sender<Message>>,
-        rx: Receiver<Message>,
-        leader_tx: Sender<Message>,
-        condvar_return: Arc<(Mutex<usize>, Condvar)>,
-        condvar_listen: Arc<(Mutex<usize>, Condvar)>,
-        condvar_transfer: Arc<(Mutex<usize>, Condvar)>
-    ) {
-        let total_miners : usize = other_miners.len() + 1;
-        let mut counter_told = 0;
-        let mut total_gold_pips = 0;
-        let mut last_miners_ready = 0;
-        let mut last_all_ready_1 = 0;
-        let mut last_all_ready_2 = 0;
-        let mut miners_gold_pips = HashMap::new();
 
-        for miner_id in 0..total_miners {
-            miners_gold_pips.insert(miner_id, 0);
-        }
+    return best_miners;
+}
+fn miner_loop(
+    id: usize,
+    other_miners: &mut HashMap<usize, Sender<Message>>,
+    rx: Receiver<Message>,
+    leader_tx: Sender<Message>,
+    condvar_return: Arc<(Mutex<usize>, Condvar)>,
+    condvar_listen: Arc<(Mutex<usize>, Condvar)>,
+    condvar_transfer: Arc<(Mutex<usize>, Condvar)>
+) {
+    let total_miners : usize = other_miners.len() + 1;
+    let mut counter_told = 0;
+    let mut total_gold_pips = 0;
+    let mut last_miners_ready = 0;
+    let mut last_all_ready_1 = 0;
+    let mut last_all_ready_2 = 0;
+    let mut miners_gold_pips = HashMap::new();
 
-        loop {
-            //Esperamos recibir un mensaje para operar
-            let recv_msg = rx.recv().unwrap();
+    for miner_id in 0..total_miners {
+        miners_gold_pips.insert(miner_id, 0);
+    }
 
-            match recv_msg.cmd {
-                Commands::EXPLORE => {
-                    println!("Miner {} was sent to explore a region", id);
-                    
-                    let gold_pips = miners_gold_pips.entry(id).or_insert(0);
+    loop {
+        //Esperamos recibir un mensaje para operar
+        let recv_msg = rx.recv().unwrap();
 
-                    *gold_pips = miner::explore();
+        match recv_msg.cmd {
+            Commands::EXPLORE => {
+                println!("Miner {} was sent to explore a region", id);
+                
+                let gold_pips = miners_gold_pips.entry(id).or_insert(0);
 
-                    total_gold_pips += miners_gold_pips[&id];
-                },
-                Commands::RETURN => {
-                    println!("Miner {} returned with {} gold pips", id, miners_gold_pips[&id]);
+                *gold_pips = miner::explore();
 
-                    //Esperamos a que los demas mineros vuelvan
-                    wait(other_miners.len() + 1 + last_miners_ready, &condvar_return);
-                    last_miners_ready += other_miners.len() + 1;
+                total_gold_pips += miners_gold_pips[&id];
+            },
+            Commands::RETURN => {
+                println!("Miner {} returned with {} gold pips", id, miners_gold_pips[&id]);
 
-                    for miner in other_miners.values() {
-                        let send_msg = Message {
-                            id: id,
-                            cmd: Commands::LISTEN,
-                            extra: Some(miners_gold_pips[&id].clone())
-                        };
+                //Esperamos a que los demas mineros vuelvan
+                wait(other_miners.len() + 1 + last_miners_ready, &condvar_return);
+                last_miners_ready += other_miners.len() + 1;
 
-                        miner.send(send_msg).unwrap();
-                    }
-
+                for miner in other_miners.values() {
                     let send_msg = Message {
                         id: id,
                         cmd: Commands::LISTEN,
                         extra: Some(miners_gold_pips[&id].clone())
                     };
 
-                    leader_tx.send(send_msg).unwrap();
-                },
-                Commands::LISTEN => {
-                    println!("Miner {} was told by Miner {} that this mined {} gold pips", id, recv_msg.id, recv_msg.extra.unwrap());
-                    
-                    let gold_pips = miners_gold_pips.entry(recv_msg.id).or_insert(0);
+                    miner.send(send_msg).unwrap();
+                }
 
-                    *gold_pips = recv_msg.extra.unwrap();
-                                    
-                    counter_told += 1;
+                let send_msg = Message {
+                    id: id,
+                    cmd: Commands::LISTEN,
+                    extra: Some(miners_gold_pips[&id].clone())
+                };
 
-                    if counter_told == other_miners.len() {
-                        counter_told = 0;
-                        //Esperamos a que todos sepan la cantidad de
-                        //pepitas de oro que minó cada minero
-                        wait(other_miners.len() + 2 + last_all_ready_1, &condvar_listen);
+                leader_tx.send(send_msg).unwrap();
+            },
+            Commands::LISTEN => {
+                println!("Miner {} was told by Miner {} that this mined {} gold pips", id, recv_msg.id, recv_msg.extra.unwrap());
+                
+                let gold_pips = miners_gold_pips.entry(recv_msg.id).or_insert(0);
 
-                        last_all_ready_1 += other_miners.len() + 2;
+                *gold_pips = recv_msg.extra.unwrap();
+                                
+                counter_told += 1;
 
-                        let worst_miners = get_worst_miners(&miners_gold_pips);
-                        let best_miners = get_best_miners(&miners_gold_pips);
+                if counter_told == other_miners.len() {
+                    counter_told = 0;
+                    //Esperamos a que todos sepan la cantidad de
+                    //pepitas de oro que minó cada minero
+                    wait(other_miners.len() + 2 + last_all_ready_1, &condvar_listen);
 
-                        if worst_miners.len() > 1 {
-                            println!("More than 2 miners are the worst");
+                    last_all_ready_1 += other_miners.len() + 2;
 
-                            wait(other_miners.len() + 2 + last_all_ready_2, &condvar_transfer);
+                    let worst_miners = get_worst_miners(&miners_gold_pips);
+                    let best_miners = get_best_miners(&miners_gold_pips);
 
-                            last_all_ready_2 += other_miners.len() + 2;
-                            continue;
-                        }
+                    if worst_miners.len() > 1 {
+                        println!("More than 2 miners are the worst");
 
-                        //Veo si soy el peor minero
-                        if worst_miners.contains(&id) {
-                            let tranfer_ammount = total_gold_pips / best_miners.len() as i32;
-
-                            for miner_id in best_miners {
-                                let send_msg = Message {
-                                    id: id,
-                                    cmd: Commands::TRANSFER,
-                                    extra: Some(tranfer_ammount.clone())
-                                };
-
-                                other_miners[&miner_id].send(send_msg).unwrap();                            
-                            }
-                            println!("Miner {} retired", id);   
-                            break;
-                        } else {
-                            other_miners.remove(&worst_miners[0]);
-                            miners_gold_pips.remove(&worst_miners[0]);
-                        }
-
-                        //Veo si soy uno de los mejores mineros
-                        if best_miners.contains(&id) {
-                            continue;
-                        }
                         wait(other_miners.len() + 2 + last_all_ready_2, &condvar_transfer);
 
                         last_all_ready_2 += other_miners.len() + 2;
+                        continue;
                     }
-                },     
-                Commands::TRANSFER => {
-                    println!("Miner {} received {} pips from Miner {}", id, recv_msg.extra.unwrap(), recv_msg.id);
 
-                    total_gold_pips += recv_msg.extra.unwrap();
+                    //Veo si soy el peor minero
+                    if worst_miners.contains(&id) {
+                        let tranfer_ammount = total_gold_pips / best_miners.len() as i32;
+
+                        for miner_id in best_miners {
+                            let send_msg = Message {
+                                id: id,
+                                cmd: Commands::TRANSFER,
+                                extra: Some(tranfer_ammount.clone())
+                            };
+
+                            other_miners[&miner_id].send(send_msg).unwrap();                            
+                        }
+                        println!("Miner {} retired", id);   
+                        break;
+                    } else {
+                        other_miners.remove(&worst_miners[0]);
+                        miners_gold_pips.remove(&worst_miners[0]);
+                    }
+
+                    //Veo si soy uno de los mejores mineros
+                    if best_miners.contains(&id) {
+                        continue;
+                    }
                     wait(other_miners.len() + 2 + last_all_ready_2, &condvar_transfer);
 
-                    last_all_ready_2 += other_miners.len() + 2;             
-                },
-                Commands::STOP => {
-                    break;
+                    last_all_ready_2 += other_miners.len() + 2;
                 }
-            }
+            },     
+            Commands::TRANSFER => {
+                println!("Miner {} received {} pips from Miner {}", id, recv_msg.extra.unwrap(), recv_msg.id);
 
-            //break;
+                total_gold_pips += recv_msg.extra.unwrap();
+                wait(other_miners.len() + 2 + last_all_ready_2, &condvar_transfer);
+
+                last_all_ready_2 += other_miners.len() + 2;             
+            },
+            Commands::STOP => {
+                break;
+            }
         }
+
+        //break;
     }
+}
 
 fn wait(value: usize,
     condvar: &Arc<(Mutex<usize>, Condvar)>
