@@ -1,5 +1,6 @@
 mod concumining;
 
 fn main() {
-    concumining::start(5, 5);
+    let simulation = concumining::Concumining::new(5, 5);
+    simulation.start();
 }
