@@ -1,6 +1,9 @@
 #[path = "miner.rs"]
 pub mod miner;
 
+#[path = "ipc/mod.rs"]
+pub mod ipc;
+
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, Condvar};
@@ -8,20 +11,6 @@ use std::collections::HashMap;
 use std::thread;
 use std::time;
 
-#[derive(Clone)]
-enum Commands {
-    EXPLORE,
-    RETURN,
-    STOP,
-    LISTEN,
-    TRANSFER
-}
-
-struct Message {
-    id: usize,
-    cmd: Commands,
-    extra: Option<u32>,
-}
 
 pub struct Concumining {
     pub total_miners: usize,
@@ -39,11 +28,11 @@ impl Concumining {
         let mut senders = HashMap::new();
 
         //Canal de comunicacion del lider
-        let (leader_tx, leader_rx): (Sender<Message>, Receiver<Message>) = mpsc::channel();
+        let (leader_tx, leader_rx): (Sender<ipc::Message>, Receiver<ipc::Message>) = mpsc::channel();
 
         //Creamos los canales de cada minero
         for id in 0..self.total_miners {
-            let (tx, rx): (Sender<Message>, Receiver<Message>) = mpsc::channel();
+            let (tx, rx): (Sender<ipc::Message>, Receiver<ipc::Message>) = mpsc::channel();
 
             senders.insert(id, tx);
             receivers.push(rx);
@@ -84,8 +73,8 @@ impl Concumining {
     }
 
     fn leader_loop(&self,
-        leader_rx: Receiver<Message>,
-        senders: &mut HashMap<usize, Sender<Message>>,
+        leader_rx: Receiver<ipc::Message>,
+        senders: &mut HashMap<usize, Sender<ipc::Message>>,
         condvar_listen: Arc<(Mutex<usize>, Condvar)>,
         condvar_transfer: Arc<(Mutex<usize>, Condvar)>
     ) {
@@ -107,13 +96,13 @@ impl Concumining {
                 break;
             }
             //Ordenamos a los mineros a explorar
-            self.give_orders(leader_id, &senders, Commands::EXPLORE);
+            self.give_orders(leader_id, &senders, ipc::Commands::EXPLORE);
 
             //Esperamos 2 segundos para dar la orden de regreso
             thread::sleep(time::Duration::from_millis(2000));
 
             //Ordenamos a los mineros a volver
-            self.give_orders(leader_id, &senders, Commands::RETURN);
+            self.give_orders(leader_id, &senders, ipc::Commands::RETURN);
 
             wait(senders.len() + 1 + last_all_ready1, &condvar_listen);
 
@@ -137,14 +126,14 @@ impl Concumining {
             last_all_ready2 += senders.len() + 1;
         }  
 
-        self.give_orders(leader_id, &senders, Commands::STOP);
+        self.give_orders(leader_id, &senders, ipc::Commands::STOP);
     }
 
-    fn give_orders(&self, leader_id: usize, senders: &HashMap<usize, Sender<Message>>, command: Commands) {
+    fn give_orders(&self, leader_id: usize, senders: &HashMap<usize, Sender<ipc::Message>>, command: ipc::Commands) {
         for miner_tx in senders.values() {
             let cmd = command.clone();
 
-            let send_msg = Message {
+            let send_msg = ipc::Message {
                 id: leader_id,
                 cmd: cmd,
                 extra: None
@@ -220,16 +209,16 @@ struct Miner {
     _return: Arc<(Mutex<usize>, Condvar)>,
     transfer: Arc<(Mutex<usize>, Condvar)>,
     id: usize,
-    recv_channel: Receiver<Message>,
-    leader: Sender<Message>,
-    other_miners: HashMap<usize, Sender<Message>>
+    recv_channel: Receiver<ipc::Message>,
+    leader: Sender<ipc::Message>,
+    other_miners: HashMap<usize, Sender<ipc::Message>>
 }
 
 impl Miner {
     fn new(id: usize,
-           other_miners: &mut HashMap<usize, Sender<Message>>,
-           rx: Receiver<Message>,
-           leader_tx: Sender<Message>,
+           other_miners: &mut HashMap<usize, Sender<ipc::Message>>,
+           rx: Receiver<ipc::Message>,
+           leader_tx: Sender<ipc::Message>,
            condvar_return: Arc<(Mutex<usize>, Condvar)>,
            condvar_listen: Arc<(Mutex<usize>, Condvar)>,
            condvar_transfer: Arc<(Mutex<usize>, Condvar)>) -> Miner {
@@ -263,7 +252,7 @@ impl Miner {
             let recv_msg = self.recv_channel.recv().unwrap();
 
             match recv_msg.cmd {
-                Commands::EXPLORE => {
+                ipc::Commands::EXPLORE => {
                     println!("Miner {} was sent to explore a region", self.id);
                     
 
@@ -271,7 +260,7 @@ impl Miner {
                     miners_gold_pips.insert(self.id, gold_pips);
                     total_gold_pips += gold_pips;
                 },
-                Commands::RETURN => {
+                ipc::Commands::RETURN => {
                     println!("Miner {} returned with {} gold pips", self.id, miners_gold_pips.get(self.id));
 
                     //Esperamos a que los demas mineros vuelvan
@@ -279,24 +268,24 @@ impl Miner {
                     last_miners_ready += self.other_miners.len() + 1;
 
                     for miner in self.other_miners.values() {
-                        let send_msg = Message {
+                        let send_msg = ipc::Message {
                             id: self.id,
-                            cmd: Commands::LISTEN,
+                            cmd: ipc::Commands::LISTEN,
                             extra: Some(miners_gold_pips.get(self.id).clone())
                         };
 
                         miner.send(send_msg).unwrap();
                     }
 
-                    let send_msg = Message {
+                    let send_msg = ipc::Message {
                         id: self.id,
-                        cmd: Commands::LISTEN,
+                        cmd: ipc::Commands::LISTEN,
                         extra: Some(miners_gold_pips.get(self.id).clone())
                     };
 
                     self.leader.send(send_msg).unwrap();
                 },
-                Commands::LISTEN => {
+                ipc::Commands::LISTEN => {
                     println!("Miner {} was told by Miner {} that this mined {} gold pips", self.id, recv_msg.id, recv_msg.extra.unwrap());
                     
                     let gold_pips = recv_msg.extra.unwrap();
@@ -328,9 +317,9 @@ impl Miner {
                             let tranfer_ammount = total_gold_pips / best_miners.len() as u32;
 
                             for miner_id in best_miners {
-                                let send_msg = Message {
+                                let send_msg = ipc::Message {
                                     id: self.id,
-                                    cmd: Commands::TRANSFER,
+                                    cmd: ipc::Commands::TRANSFER,
                                     extra: Some(tranfer_ammount.clone())
                                 };
 
@@ -352,7 +341,7 @@ impl Miner {
                         last_all_ready_2 += self.other_miners.len() + 2;
                     }
                 },     
-                Commands::TRANSFER => {
+                ipc::Commands::TRANSFER => {
                     println!("Miner {} received {} pips from Miner {}", self.id, recv_msg.extra.unwrap(), recv_msg.id);
 
                     total_gold_pips += recv_msg.extra.unwrap();
@@ -360,7 +349,7 @@ impl Miner {
 
                     last_all_ready_2 += self.other_miners.len() + 2;             
                 },
-                Commands::STOP => {
+                ipc::Commands::STOP => {
                     break;
                 }
             }
