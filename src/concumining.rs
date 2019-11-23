@@ -20,7 +20,7 @@ enum Commands {
 struct Message {
     id: usize,
     cmd: Commands,
-    extra: Option<i32>,
+    extra: Option<u32>,
 }
 
 pub struct Concumining {
@@ -99,7 +99,7 @@ impl Concumining {
         condvar_transfer: Arc<(Mutex<usize>, Condvar)>
     ) {
         let leader_id = self.total_miners + 1;
-        let mut miners_gold_pips = HashMap::new();
+        let mut miners_gold_pips = MinersInfo::new();
         let mut last_all_ready1 = 0;
         let mut last_all_ready2 = 0;
 
@@ -130,16 +130,15 @@ impl Concumining {
 
             for _ in 0..(senders.len()) {
                 let recv_msg = leader_rx.recv().unwrap();
+                let gold_pips = recv_msg.extra.unwrap();
+                miners_gold_pips.insert(recv_msg.id, gold_pips);
 
-                let gold_pips = miners_gold_pips.entry(recv_msg.id).or_insert(0);
-
-                *gold_pips = recv_msg.extra.unwrap();  
             }
-            let worst_miners = get_worst_miners(&miners_gold_pips);
+            let worst_miners = miners_gold_pips.get_worst_miners();
 
             if worst_miners.len() == 1 {
                 senders.remove(&worst_miners[0]);
-                miners_gold_pips.remove(&worst_miners[0]);
+                miners_gold_pips.remove(worst_miners[0]);
             }
 
             wait(senders.len() + 1 + last_all_ready2, &condvar_transfer);
@@ -167,41 +166,66 @@ impl Concumining {
 
 }
 
-fn get_worst_miners(miners_gold_pips: &HashMap<usize, i32>) -> Vec<usize> {
-    let mut worst_miners: Vec<usize> = Vec::new();
+struct MinersInfo {
+    info: HashMap<usize, u32>
+}
 
-    let mut worst_pips = 9999;
+impl MinersInfo {
+    fn new() -> MinersInfo {
+        return MinersInfo { info: HashMap::new() }
+    }
 
-    for (miner_id, gold_pips) in miners_gold_pips.iter() {
-        if *gold_pips < worst_pips {
-            worst_pips = *gold_pips;
-            worst_miners.clear();
-            worst_miners.push(*miner_id);
-        } else if *gold_pips == worst_pips {
-            worst_miners.push(*miner_id);
+    fn insert(&mut self, key: usize, val: u32) {
+        self.info.insert(key, val);
+    }
+
+    fn remove(&mut self, key: usize) {
+        self.info.remove(&key);
+    }
+    fn get(&mut self, id: usize) -> u32 {
+        match self.info.get(&id) {
+            Some(val) => { return *val; }
+            None => { self.info.insert(id, 0); return 0; }
         }
     }
 
-    return worst_miners;
-}
+    fn get_worst_miners(&self) -> Vec<usize> {
+        let mut worst_miners: Vec<usize> = Vec::new();
 
-fn get_best_miners(miners_gold_pips: &HashMap<usize, i32>) -> Vec<usize> {
-    let mut best_miners: Vec<usize> = Vec::new();
+        let mut worst_pips = 9999;
 
-    let mut best_pips = 0;
-
-    for (miner_id, gold_pips) in miners_gold_pips.iter() {
-        if *gold_pips > best_pips {
-            best_pips = *gold_pips;
-            best_miners.clear();
-            best_miners.push(*miner_id);
-        } else if *gold_pips == best_pips {
-            best_miners.push(*miner_id);
+        for (miner_id, gold_pips) in self.info.iter() {
+            if *gold_pips < worst_pips {
+                worst_pips = *gold_pips;
+                worst_miners.clear();
+                worst_miners.push(*miner_id);
+            } else if *gold_pips == worst_pips {
+                worst_miners.push(*miner_id);
+            }
         }
+
+        return worst_miners;
     }
 
-    return best_miners;
+    fn get_best_miners(&self) -> Vec<usize> {
+        let mut best_miners: Vec<usize> = Vec::new();
+
+        let mut best_pips = 0;
+
+        for (miner_id, gold_pips) in self.info.iter() {
+            if *gold_pips > best_pips {
+                best_pips = *gold_pips;
+                best_miners.clear();
+                best_miners.push(*miner_id);
+            } else if *gold_pips == best_pips {
+                best_miners.push(*miner_id);
+            }
+        }
+
+        return best_miners;
+    }
 }
+
 fn miner_loop(
     id: usize,
     other_miners: &mut HashMap<usize, Sender<Message>>,
@@ -217,7 +241,7 @@ fn miner_loop(
     let mut last_miners_ready = 0;
     let mut last_all_ready_1 = 0;
     let mut last_all_ready_2 = 0;
-    let mut miners_gold_pips = HashMap::new();
+    let mut miners_gold_pips = MinersInfo::new();
 
     for miner_id in 0..total_miners {
         miners_gold_pips.insert(miner_id, 0);
@@ -231,14 +255,13 @@ fn miner_loop(
             Commands::EXPLORE => {
                 println!("Miner {} was sent to explore a region", id);
                 
-                let gold_pips = miners_gold_pips.entry(id).or_insert(0);
 
-                *gold_pips = miner::explore();
-
-                total_gold_pips += miners_gold_pips[&id];
+                let gold_pips = miner::explore();
+                miners_gold_pips.insert(id, gold_pips);
+                total_gold_pips += gold_pips;
             },
             Commands::RETURN => {
-                println!("Miner {} returned with {} gold pips", id, miners_gold_pips[&id]);
+                println!("Miner {} returned with {} gold pips", id, miners_gold_pips.get(id));
 
                 //Esperamos a que los demas mineros vuelvan
                 wait(other_miners.len() + 1 + last_miners_ready, &condvar_return);
@@ -248,7 +271,7 @@ fn miner_loop(
                     let send_msg = Message {
                         id: id,
                         cmd: Commands::LISTEN,
-                        extra: Some(miners_gold_pips[&id].clone())
+                        extra: Some(miners_gold_pips.get(id).clone())
                     };
 
                     miner.send(send_msg).unwrap();
@@ -257,7 +280,7 @@ fn miner_loop(
                 let send_msg = Message {
                     id: id,
                     cmd: Commands::LISTEN,
-                    extra: Some(miners_gold_pips[&id].clone())
+                    extra: Some(miners_gold_pips.get(id).clone())
                 };
 
                 leader_tx.send(send_msg).unwrap();
@@ -265,10 +288,8 @@ fn miner_loop(
             Commands::LISTEN => {
                 println!("Miner {} was told by Miner {} that this mined {} gold pips", id, recv_msg.id, recv_msg.extra.unwrap());
                 
-                let gold_pips = miners_gold_pips.entry(recv_msg.id).or_insert(0);
-
-                *gold_pips = recv_msg.extra.unwrap();
-                                
+                let gold_pips = recv_msg.extra.unwrap();
+                miners_gold_pips.insert(recv_msg.id, gold_pips);
                 counter_told += 1;
 
                 if counter_told == other_miners.len() {
@@ -279,8 +300,8 @@ fn miner_loop(
 
                     last_all_ready_1 += other_miners.len() + 2;
 
-                    let worst_miners = get_worst_miners(&miners_gold_pips);
-                    let best_miners = get_best_miners(&miners_gold_pips);
+                    let worst_miners = miners_gold_pips.get_worst_miners();
+                    let best_miners = miners_gold_pips.get_best_miners();
 
                     if worst_miners.len() > 1 {
                         println!("More than 2 miners are the worst");
@@ -293,7 +314,7 @@ fn miner_loop(
 
                     //Veo si soy el peor minero
                     if worst_miners.contains(&id) {
-                        let tranfer_ammount = total_gold_pips / best_miners.len() as i32;
+                        let tranfer_ammount = total_gold_pips / best_miners.len() as u32;
 
                         for miner_id in best_miners {
                             let send_msg = Message {
@@ -308,7 +329,7 @@ fn miner_loop(
                         break;
                     } else {
                         other_miners.remove(&worst_miners[0]);
-                        miners_gold_pips.remove(&worst_miners[0]);
+                        miners_gold_pips.remove(worst_miners[0]);
                     }
 
                     //Veo si soy uno de los mejores mineros
