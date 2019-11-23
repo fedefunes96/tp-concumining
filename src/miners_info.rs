@@ -17,6 +17,13 @@ impl MinersInfo {
         self.info.remove(&key);
     }
 
+    pub fn get(&mut self, id: usize) -> u32 {
+        match self.info.get(&id) {
+            Some(val) => { return *val; }
+            None => { self.info.insert(id, 0); return 0; }
+        }
+    }
+
     pub fn get_worst_miners(&self) -> Vec<usize> {
         let mut worst_miners: Vec<usize> = Vec::new();
 
