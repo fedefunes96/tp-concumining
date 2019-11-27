@@ -1,10 +1,12 @@
 #[macro_use]
 extern crate clap;
-mod concumining;
 
 use clap::{App, Arg};
 
 mod ipc;
+mod workers;
+mod concumining;
+mod miners_info;
 
 fn main() {
     let app = App::new("Concumining")
@@ -25,6 +27,6 @@ fn main() {
     let miners = value_t!(matches, "miners", usize).unwrap();
     let rounds = value_t!(matches, "rounds", usize).unwrap();
     println!("Simulating {} miners, {} rounds...", miners, rounds);
-    let simulation = concumining::Concumining::new(miners, rounds);
+    let simulation = concumining::concumining::Concumining::new(miners, rounds);
     simulation.start();
 }

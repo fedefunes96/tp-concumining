@@ -1,8 +1,7 @@
 extern crate rand;
 extern crate rand_distr;
 
-#[path = "miners_info.rs"]
-pub mod miners_info;
+use crate::miners_info::{info::MinersInfo};
 
 static MAX_GOLD_PIPS: f64 = 20.0;
 
@@ -48,7 +47,7 @@ impl Miner {
         let total_miners : usize = self.other_miners.len() + 1;
         let mut counter_told = 0;
         let mut total_gold_pips = 0;
-        let mut miners_gold_pips = miners_info::MinersInfo::new();
+        let mut miners_gold_pips = MinersInfo::new();
 
         for miner_id in 0..total_miners {
             miners_gold_pips.insert(miner_id, 0);

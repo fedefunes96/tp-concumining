@@ -1,11 +1,5 @@
-#[path = "miner.rs"]
-pub mod miner;
-
 use crate::ipc::{Message, barrier::Barrier, Commands};
-
-
-#[path = "miners_info.rs"]
-pub mod miners_info;
+use crate::miners_info::{info::MinersInfo};
 
 use std::sync::mpsc::{Sender, Receiver};
 use std::collections::HashMap;
@@ -38,7 +32,7 @@ impl Leader {
                total_miners: usize,
                rounds: usize) {
         let leader_id = total_miners + 1;
-        let mut miners_gold_pips = miners_info::MinersInfo::new();
+        let mut miners_gold_pips = MinersInfo::new();
 
         for miner_id in 0..total_miners {
             miners_gold_pips.insert(miner_id, 0);
