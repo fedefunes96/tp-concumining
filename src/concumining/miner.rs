@@ -8,34 +8,30 @@ static MAX_GOLD_PIPS: f64 = 20.0;
 
 use rand_distr::{Distribution, Beta};
 
-#[path = "ipc/mod.rs"]
-pub mod ipc;
-
-#[path = "ipc/barrier.rs"]
-pub mod barrier;
+use crate::ipc::{barrier::Barrier, Message, Commands};
 
 use std::sync::mpsc::{Sender, Receiver};
 use std::collections::HashMap;
 
 
 pub struct Miner {
-    listen: barrier::Barrier,
-    _return: barrier::Barrier,
-    transfer: barrier::Barrier,
+    listen: Barrier,
+    _return: Barrier,
+    transfer: Barrier,
     id: usize,
-    recv_channel: Receiver<ipc::Message>,
-    leader: Sender<ipc::Message>,
-    other_miners: HashMap<usize, Sender<ipc::Message>>
+    recv_channel: Receiver<Message>,
+    leader: Sender<Message>,
+    other_miners: HashMap<usize, Sender<Message>>
 }
 
 impl Miner {
     pub fn new(id: usize,
-           other_miners: &mut HashMap<usize, Sender<ipc::Message>>,
-           rx: Receiver<ipc::Message>,
-           leader_tx: Sender<ipc::Message>,
-           condvar_return: barrier::Barrier,
-           condvar_listen: barrier::Barrier,
-           condvar_transfer: barrier::Barrier) -> Miner {
+           other_miners: &mut HashMap<usize, Sender<Message>>,
+           rx: Receiver<Message>,
+           leader_tx: Sender<Message>,
+           condvar_return: Barrier,
+           condvar_listen: Barrier,
+           condvar_transfer: Barrier) -> Miner {
         
         return Miner {
             listen: condvar_listen.clone(),
@@ -63,7 +59,7 @@ impl Miner {
             let recv_msg = self.recv_channel.recv().unwrap();
 
             match recv_msg.cmd {
-                ipc::Commands::EXPLORE => {
+                Commands::EXPLORE => {
                     println!("Miner {} was sent to explore a region", self.id);
                     
 
@@ -71,31 +67,31 @@ impl Miner {
                     miners_gold_pips.insert(self.id, gold_pips);
                     total_gold_pips += gold_pips;
                 },
-                ipc::Commands::RETURN => {
+                Commands::RETURN => {
                     println!("Miner {} returned with {} gold pips", self.id, miners_gold_pips.get(self.id));
 
                     //Esperamos a que los demas mineros vuelvan
                     self._return.wait(self.other_miners.len() + 1);
 
                     for miner in self.other_miners.values() {
-                        let send_msg = ipc::Message {
+                        let send_msg = Message {
                             id: self.id,
-                            cmd: ipc::Commands::LISTEN,
+                            cmd: Commands::LISTEN,
                             extra: Some(miners_gold_pips.get(self.id).clone())
                         };
 
                         miner.send(send_msg).unwrap();
                     }
 
-                    let send_msg = ipc::Message {
+                    let send_msg = Message {
                         id: self.id,
-                        cmd: ipc::Commands::LISTEN,
+                        cmd: Commands::LISTEN,
                         extra: Some(miners_gold_pips.get(self.id).clone())
                     };
 
                     self.leader.send(send_msg).unwrap();
                 },
-                ipc::Commands::LISTEN => {
+                Commands::LISTEN => {
                     println!("Miner {} was told by Miner {} that this mined {} gold pips", self.id, recv_msg.id, recv_msg.extra.unwrap());
                     
                     let gold_pips = recv_msg.extra.unwrap();
@@ -123,9 +119,9 @@ impl Miner {
                             let tranfer_ammount = total_gold_pips / best_miners.len() as u32;
 
                             for miner_id in best_miners {
-                                let send_msg = ipc::Message {
+                                let send_msg = Message {
                                     id: self.id,
-                                    cmd: ipc::Commands::TRANSFER,
+                                    cmd: Commands::TRANSFER,
                                     extra: Some(tranfer_ammount.clone())
                                 };
 
@@ -146,13 +142,13 @@ impl Miner {
 
                     }
                 },     
-                ipc::Commands::TRANSFER => {
+                Commands::TRANSFER => {
                     println!("Miner {} received {} pips from Miner {}", self.id, recv_msg.extra.unwrap(), recv_msg.id);
 
                     total_gold_pips += recv_msg.extra.unwrap();
                     self.transfer.wait(self.other_miners.len() + 2);
                 },
-                ipc::Commands::STOP => {
+                Commands::STOP => {
                     break;
                 }
             }

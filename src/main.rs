@@ -4,6 +4,7 @@ mod concumining;
 
 use clap::{App, Arg};
 
+mod ipc;
 
 fn main() {
     let app = App::new("Concumining")
