@@ -1,3 +1,5 @@
+pub mod barrier;
+
 pub struct Message {
     pub id: usize,
     pub cmd: Commands,

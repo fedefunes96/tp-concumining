@@ -11,15 +11,17 @@ use rand_distr::{Distribution, Beta};
 #[path = "ipc/mod.rs"]
 pub mod ipc;
 
+#[path = "ipc/barrier.rs"]
+pub mod barrier;
+
 use std::sync::mpsc::{Sender, Receiver};
-use std::sync::{Arc, Mutex, Condvar};
 use std::collections::HashMap;
 
 
 pub struct Miner {
-    listen: Arc<(Mutex<usize>, Condvar)>,
-    _return: Arc<(Mutex<usize>, Condvar)>,
-    transfer: Arc<(Mutex<usize>, Condvar)>,
+    listen: barrier::Barrier,
+    _return: barrier::Barrier,
+    transfer: barrier::Barrier,
     id: usize,
     recv_channel: Receiver<ipc::Message>,
     leader: Sender<ipc::Message>,
@@ -31,9 +33,9 @@ impl Miner {
            other_miners: &mut HashMap<usize, Sender<ipc::Message>>,
            rx: Receiver<ipc::Message>,
            leader_tx: Sender<ipc::Message>,
-           condvar_return: Arc<(Mutex<usize>, Condvar)>,
-           condvar_listen: Arc<(Mutex<usize>, Condvar)>,
-           condvar_transfer: Arc<(Mutex<usize>, Condvar)>) -> Miner {
+           condvar_return: barrier::Barrier,
+           condvar_listen: barrier::Barrier,
+           condvar_transfer: barrier::Barrier) -> Miner {
         
         return Miner {
             listen: condvar_listen.clone(),
@@ -76,8 +78,7 @@ impl Miner {
                     println!("Miner {} returned with {} gold pips", self.id, miners_gold_pips.get(self.id));
 
                     //Esperamos a que los demas mineros vuelvan
-                    wait(self.other_miners.len() + 1 + last_miners_ready, &self._return);
-                    last_miners_ready += self.other_miners.len() + 1;
+                    self._return.wait(self.other_miners.len() + 1);
 
                     for miner in self.other_miners.values() {
                         let send_msg = ipc::Message {
@@ -108,9 +109,7 @@ impl Miner {
                         counter_told = 0;
                         //Esperamos a que todos sepan la cantidad de
                         //pepitas de oro que minó cada minero
-                        wait(self.other_miners.len() + 2 + last_all_ready_1, &self.listen);
-
-                        last_all_ready_1 += self.other_miners.len() + 2;
+                        self.listen.wait(self.other_miners.len() + 2);
 
                         let worst_miners = miners_gold_pips.get_worst_miners();
                         let best_miners = miners_gold_pips.get_best_miners();
@@ -118,9 +117,7 @@ impl Miner {
                         if worst_miners.len() > 1 {
                             println!("More than 2 miners are the worst");
 
-                            wait(self.other_miners.len() + 2 + last_all_ready_2, &self.transfer);
-
-                            last_all_ready_2 += self.other_miners.len() + 2;
+                            self.transfer.wait(self.other_miners.len() + 2);
                             continue;
                         }
 
@@ -148,18 +145,15 @@ impl Miner {
                         if best_miners.contains(&self.id) {
                             continue;
                         }
-                        wait(self.other_miners.len() + 2 + last_all_ready_2, &self.transfer);
+                        self.transfer.wait(self.other_miners.len() + 2);
 
-                        last_all_ready_2 += self.other_miners.len() + 2;
                     }
                 },     
                 ipc::Commands::TRANSFER => {
                     println!("Miner {} received {} pips from Miner {}", self.id, recv_msg.extra.unwrap(), recv_msg.id);
 
                     total_gold_pips += recv_msg.extra.unwrap();
-                    wait(self.other_miners.len() + 2 + last_all_ready_2, &self.transfer);
-
-                    last_all_ready_2 += self.other_miners.len() + 2;             
+                    self.transfer.wait(self.other_miners.len() + 2);
                 },
                 ipc::Commands::STOP => {
                     break;
@@ -177,21 +171,4 @@ pub fn explore() -> u32 {
     let beta = Beta::new(2.0, 5.0).unwrap();
 
     return (beta.sample(&mut rng) * MAX_GOLD_PIPS) as u32;
-}
-
-
-fn wait(value: usize,
-    condvar: &Arc<(Mutex<usize>, Condvar)>
-) {
-    let (lock, cvar) = &**condvar;
-    let mut counter = lock.lock().unwrap();
-
-    *counter += 1;
-
-    if *counter == value {
-        cvar.notify_all();
-    }
-    while *counter < value {
-        counter = cvar.wait(counter).unwrap();
-    }
 }
