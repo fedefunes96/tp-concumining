@@ -52,9 +52,6 @@ impl Miner {
         let total_miners : usize = self.other_miners.len() + 1;
         let mut counter_told = 0;
         let mut total_gold_pips = 0;
-        let mut last_miners_ready = 0;
-        let mut last_all_ready_1 = 0;
-        let mut last_all_ready_2 = 0;
         let mut miners_gold_pips = miners_info::MinersInfo::new();
 
         for miner_id in 0..total_miners {
@@ -70,7 +67,7 @@ impl Miner {
                     println!("Miner {} was sent to explore a region", self.id);
                     
 
-                    let gold_pips = explore();
+                    let gold_pips = self.explore();
                     miners_gold_pips.insert(self.id, gold_pips);
                     total_gold_pips += gold_pips;
                 },
@@ -163,12 +160,13 @@ impl Miner {
             //break;
         }
     }
-}
 
-pub fn explore() -> u32 {
-    let mut rng = rand::thread_rng();
+    fn explore(&self) -> u32 {
+        let mut rng = rand::thread_rng();
 
-    let beta = Beta::new(2.0, 5.0).unwrap();
+        let beta = Beta::new(2.0, 5.0).unwrap();
 
-    return (beta.sample(&mut rng) * MAX_GOLD_PIPS) as u32;
+        return (beta.sample(&mut rng) * MAX_GOLD_PIPS) as u32;
+    }
+
 }
