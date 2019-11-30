@@ -63,99 +63,20 @@ impl Miner {
 
             match recv_msg.cmd {
                 Commands::EXPLORE => {
-                    self.logger.write(format!("Miner {} was sent to explore a region", self.id));
-                    println!("Miner {} was sent to explore a region", self.id);
-                    
-
-                    let gold_pips = self.explore();
-                    miners_gold_pips.insert(self.id, gold_pips);
-                    total_gold_pips += gold_pips;
+                    self.miner_explore(&mut miners_gold_pips, &mut total_gold_pips)
                 },
                 Commands::RETURN => {
-                    self.logger.write(format!("Miner {} returned with {} gold pips", self.id, miners_gold_pips.get(self.id)));
-                    println!("Miner {} returned with {} gold pips", self.id, miners_gold_pips.get(self.id));
-
-                    //Esperamos a que los demas mineros vuelvan
-                    self._return.wait(self.other_miners.len() + 1);
-
-                    for miner in self.other_miners.values() {
-                        let send_msg = Message {
-                            id: self.id,
-                            cmd: Commands::LISTEN,
-                            extra: Some(miners_gold_pips.get(self.id).clone())
-                        };
-
-                        miner.send(send_msg).unwrap();
-                    }
-
-                    let send_msg = Message {
-                        id: self.id,
-                        cmd: Commands::LISTEN,
-                        extra: Some(miners_gold_pips.get(self.id).clone())
-                    };
-
-                    self.leader.send(send_msg).unwrap();
+                    self.miner_return(&mut miners_gold_pips);
                 },
                 Commands::LISTEN => {
-                    self.logger.write(format!("Miner {} was told by Miner {} that this mined {} gold pips", self.id, recv_msg.id, recv_msg.extra.unwrap()));
-                    println!("Miner {} was told by Miner {} that this mined {} gold pips", self.id, recv_msg.id, recv_msg.extra.unwrap());
-                    
-                    let gold_pips = recv_msg.extra.unwrap();
-                    miners_gold_pips.insert(recv_msg.id, gold_pips);
-                    counter_told += 1;
+                    let miner_continue = self.miner_listen(recv_msg.id, recv_msg.extra.unwrap(), &mut counter_told, total_gold_pips, &mut miners_gold_pips);
 
-                    if counter_told == self.other_miners.len() {
-                        counter_told = 0;
-                        //Esperamos a que todos sepan la cantidad de
-                        //pepitas de oro que minó cada minero
-                        self.listen.wait(self.other_miners.len() + 2);
-
-                        let worst_miners = miners_gold_pips.get_worst_miners();
-                        let best_miners = miners_gold_pips.get_best_miners();
-
-                        if worst_miners.len() > 1 {
-                            self.logger.write(format!("More than 2 miners are the worst"));
-                            println!("More than 2 miners are the worst");
-
-                            self.transfer.wait(self.other_miners.len() + 2);
-                            continue;
-                        }
-
-                        //Veo si soy el peor minero
-                        if worst_miners.contains(&self.id) {
-                            let tranfer_ammount = total_gold_pips / best_miners.len() as u32;
-
-                            for miner_id in best_miners {
-                                let send_msg = Message {
-                                    id: self.id,
-                                    cmd: Commands::TRANSFER,
-                                    extra: Some(tranfer_ammount.clone())
-                                };
-
-                                self.other_miners[&miner_id].send(send_msg).unwrap();                            
-                            }
-                            self.logger.write(format!("Miner {} retired", self.id));
-                            println!("Miner {} retired", self.id);   
-                            break;
-                        } else {
-                            self.other_miners.remove(&worst_miners[0]);
-                            miners_gold_pips.remove(worst_miners[0]);
-                        }
-
-                        //Veo si soy uno de los mejores mineros
-                        if best_miners.contains(&self.id) {
-                            continue;
-                        }
-                        self.transfer.wait(self.other_miners.len() + 2);
-
+                    if !miner_continue {
+                        break;
                     }
                 },     
                 Commands::TRANSFER => {
-                    self.logger.write(format!("Miner {} received {} pips from Miner {}", self.id, recv_msg.extra.unwrap(), recv_msg.id));
-                    println!("Miner {} received {} pips from Miner {}", self.id, recv_msg.extra.unwrap(), recv_msg.id);
-
-                    total_gold_pips += recv_msg.extra.unwrap();
-                    self.transfer.wait(self.other_miners.len() + 2);
+                    self.miner_transfer(recv_msg.id, recv_msg.extra.unwrap(), &mut total_gold_pips);
                 },
                 Commands::STOP => {
                     break;
@@ -174,4 +95,114 @@ impl Miner {
         return (beta.sample(&mut rng) * MAX_GOLD_PIPS) as u32;
     }
 
+    fn miner_explore(&mut self, miners_gold_pips: &mut MinersInfo, total_gold_pips: &mut u32) {
+        self.logger.write(format!("Miner {} was sent to explore a region", self.id));
+        println!("Miner {} was sent to explore a region", self.id);
+                    
+        let gold_pips = self.explore();
+        miners_gold_pips.insert(self.id, gold_pips);
+        *total_gold_pips += gold_pips;        
+    }
+
+    fn miner_return(&mut self, miners_gold_pips: &mut MinersInfo) {
+        self.logger.write(format!("Miner {} returned with {} gold pips", self.id, miners_gold_pips.get(self.id)));
+        println!("Miner {} returned with {} gold pips", self.id, miners_gold_pips.get(self.id));
+
+        //Esperamos a que los demas mineros vuelvan
+        self._return.wait(self.other_miners.len() + 1);
+
+        self.send_command_all(Commands::LISTEN, Some(miners_gold_pips.get(self.id).clone()));
+
+        self.send_command_leader(Commands::LISTEN, Some(miners_gold_pips.get(self.id).clone()));
+    }
+
+    fn miner_listen(&mut self, who: usize, pips: u32, counter_told: &mut usize, total_gold_pips: u32, miners_gold_pips: &mut MinersInfo) -> bool {
+        self.logger.write(format!("Miner {} was told by Miner {} that this mined {} gold pips", self.id, who, pips));
+        println!("Miner {} was told by Miner {} that this mined {} gold pips", self.id, who, pips);
+                    
+        miners_gold_pips.insert(who, pips);
+        *counter_told += 1;
+
+        if *counter_told == self.other_miners.len() {
+            *counter_told = 0;
+            //Esperamos a que todos sepan la cantidad de
+            //pepitas de oro que minó cada minero
+            self.listen.wait(self.other_miners.len() + 2);
+
+            let worst_miners = miners_gold_pips.get_worst_miners();
+            let best_miners = miners_gold_pips.get_best_miners();
+
+            if worst_miners.len() > 1 {
+                self.logger.write(format!("More than 2 miners are the worst"));
+                println!("More than 2 miners are the worst");
+
+                self.transfer.wait(self.other_miners.len() + 2);
+                return true;
+            }
+
+            //Veo si soy el peor minero
+            if worst_miners.contains(&self.id) {
+                let tranfer_ammount = total_gold_pips / best_miners.len() as u32;
+
+                self.send_command_group(best_miners, Commands::TRANSFER, Some(tranfer_ammount.clone()));
+
+                self.logger.write(format!("Miner {} retired", self.id));
+                println!("Miner {} retired", self.id);   
+                return false;
+            } else {
+                self.other_miners.remove(&worst_miners[0]);
+                miners_gold_pips.remove(worst_miners[0]);
+            }
+
+            //Veo si soy uno de los mejores mineros
+            if best_miners.contains(&self.id) {
+                return true;
+            }
+            self.transfer.wait(self.other_miners.len() + 2);
+        }
+
+        return true;
+    }
+
+    fn miner_transfer(&mut self, who: usize, receive: u32, total_gold_pips: &mut u32) {
+        self.logger.write(format!("Miner {} received {} pips from Miner {}", self.id, receive, who));
+        println!("Miner {} received {} pips from Miner {}", self.id, receive, who);
+
+        *total_gold_pips += receive;
+        self.transfer.wait(self.other_miners.len() + 2);
+    }
+
+    fn send_command_all(&mut self, command: Commands, extra_data: Option<u32>) {
+        for miner in self.other_miners.values() {
+            let send_msg = Message {
+                id: self.id,
+                cmd: command.clone(),
+                extra: extra_data
+            };
+
+            miner.send(send_msg).unwrap();
+        }
+    }
+
+    fn send_command_group(&mut self, group: Vec<usize>, command: Commands, extra_data: Option<u32>) {
+        for miner in group {
+            let send_msg = Message {
+                id: self.id,
+                cmd: command.clone(),
+                extra: extra_data
+            };
+
+            self.other_miners[&miner].send(send_msg).unwrap();
+        }
+    }
+
+    fn send_command_leader(&mut self,command: Commands, extra_data: Option<u32>) {
+        let send_msg = Message {
+            id: self.id,
+            cmd: command.clone(),
+            extra: extra_data
+        };
+
+        self.leader.send(send_msg).unwrap();        
+    }
 }
