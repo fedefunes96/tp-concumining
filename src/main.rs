@@ -7,6 +7,7 @@ mod ipc;
 mod workers;
 mod concumining;
 mod miners_info;
+mod logger;
 
 fn main() {
     let app = App::new("Concumining")

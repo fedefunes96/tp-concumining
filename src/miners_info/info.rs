@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use crate::logger::safe_writer::{SafeWriter};
 
 pub struct MinersInfo {
     info: HashMap<usize, u32>
@@ -21,6 +22,13 @@ impl MinersInfo {
         match self.info.get(&id) {
             Some(val) => { return *val; }
             None => { self.info.insert(id, 0); return 0; }
+        }
+    }
+
+    pub fn log_info(&self, logger: &mut SafeWriter) {
+        for (id, value) in self.info.iter() {
+            logger.write(format!("Miner {} has {} gold pips", id, value));
+            println!("Miner {} has {} gold pips", id, value);
         }
     }
 

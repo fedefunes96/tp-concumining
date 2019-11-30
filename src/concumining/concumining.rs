@@ -1,11 +1,13 @@
 use crate::workers::{miner::Miner, leader::Leader};
 use crate::ipc::{Message, barrier::Barrier};
+use crate::logger::safe_writer::{SafeWriter};
 
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::mpsc;
 use std::collections::HashMap;
 use std::thread;
 
+const LOG_FILE:&str = "/tmp/logs_concumining";
 
 pub struct Concumining {
     pub total_miners: usize,
@@ -22,6 +24,11 @@ impl Concumining {
         let mut receivers = Vec::new();
         let mut senders = HashMap::new();
 
+        let mut logger = SafeWriter::new(LOG_FILE);
+
+        logger.write(format!("------------------"));
+        logger.write(format!("Starting log debug"));
+        logger.write(format!("------------------"));
         //Canal de comunicacion del lider
         let (leader_tx, leader_rx): (Sender<Message>, Receiver<Message>) = mpsc::channel();
 
@@ -50,7 +57,8 @@ impl Concumining {
                 leader_tx.clone(), 
                 condvar_return.clone(), 
                 condvar_listen.clone(), 
-                condvar_transfer.clone());
+                condvar_transfer.clone(),
+                logger.clone());
 
             let miner = thread::spawn(move || {
                 the_miner.run()
@@ -62,7 +70,8 @@ impl Concumining {
 
         let mut leader = Leader::new(
             leader_rx,
-        senders, condvar_listen.clone(), condvar_transfer.clone());
+        senders, condvar_listen.clone(), condvar_transfer.clone(),
+        logger.clone());
         leader.run(self.total_miners, self.rounds);
     
         for miner in miners {

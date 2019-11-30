@@ -8,6 +8,7 @@ static MAX_GOLD_PIPS: f64 = 20.0;
 use rand_distr::{Distribution, Beta};
 
 use crate::ipc::{barrier::Barrier, Message, Commands};
+use crate::logger::safe_writer::{SafeWriter};
 
 use std::sync::mpsc::{Sender, Receiver};
 use std::collections::HashMap;
@@ -20,7 +21,8 @@ pub struct Miner {
     id: usize,
     recv_channel: Receiver<Message>,
     leader: Sender<Message>,
-    other_miners: HashMap<usize, Sender<Message>>
+    other_miners: HashMap<usize, Sender<Message>>,
+    logger: SafeWriter
 }
 
 impl Miner {
@@ -30,7 +32,8 @@ impl Miner {
            leader_tx: Sender<Message>,
            condvar_return: Barrier,
            condvar_listen: Barrier,
-           condvar_transfer: Barrier) -> Miner {
+           condvar_transfer: Barrier,
+           logs: SafeWriter) -> Miner {
         
         return Miner {
             listen: condvar_listen.clone(),
@@ -39,7 +42,8 @@ impl Miner {
             id: id,
             recv_channel: rx,
             leader: leader_tx,
-            other_miners: other_miners.clone()
+            other_miners: other_miners.clone(),
+            logger: logs.clone()
         }
     }
 
@@ -59,6 +63,7 @@ impl Miner {
 
             match recv_msg.cmd {
                 Commands::EXPLORE => {
+                    self.logger.write(format!("Miner {} was sent to explore a region", self.id));
                     println!("Miner {} was sent to explore a region", self.id);
                     
 
@@ -67,6 +72,7 @@ impl Miner {
                     total_gold_pips += gold_pips;
                 },
                 Commands::RETURN => {
+                    self.logger.write(format!("Miner {} returned with {} gold pips", self.id, miners_gold_pips.get(self.id)));
                     println!("Miner {} returned with {} gold pips", self.id, miners_gold_pips.get(self.id));
 
                     //Esperamos a que los demas mineros vuelvan
@@ -91,6 +97,7 @@ impl Miner {
                     self.leader.send(send_msg).unwrap();
                 },
                 Commands::LISTEN => {
+                    self.logger.write(format!("Miner {} was told by Miner {} that this mined {} gold pips", self.id, recv_msg.id, recv_msg.extra.unwrap()));
                     println!("Miner {} was told by Miner {} that this mined {} gold pips", self.id, recv_msg.id, recv_msg.extra.unwrap());
                     
                     let gold_pips = recv_msg.extra.unwrap();
@@ -107,6 +114,7 @@ impl Miner {
                         let best_miners = miners_gold_pips.get_best_miners();
 
                         if worst_miners.len() > 1 {
+                            self.logger.write(format!("More than 2 miners are the worst"));
                             println!("More than 2 miners are the worst");
 
                             self.transfer.wait(self.other_miners.len() + 2);
@@ -126,6 +134,7 @@ impl Miner {
 
                                 self.other_miners[&miner_id].send(send_msg).unwrap();                            
                             }
+                            self.logger.write(format!("Miner {} retired", self.id));
                             println!("Miner {} retired", self.id);   
                             break;
                         } else {
@@ -142,6 +151,7 @@ impl Miner {
                     }
                 },     
                 Commands::TRANSFER => {
+                    self.logger.write(format!("Miner {} received {} pips from Miner {}", self.id, recv_msg.extra.unwrap(), recv_msg.id));
                     println!("Miner {} received {} pips from Miner {}", self.id, recv_msg.extra.unwrap(), recv_msg.id);
 
                     total_gold_pips += recv_msg.extra.unwrap();
