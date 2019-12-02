@@ -142,9 +142,7 @@ impl Miner {
 
             //Veo si soy el peor minero
             if worst_miners.contains(&self.id) {
-                let tranfer_ammount = total_gold_pips / best_miners.len() as u32;
-
-                self.send_command_group(best_miners, Commands::TRANSFER, Some(tranfer_ammount.clone()));
+                self.send_gold_pips(best_miners, total_gold_pips);
 
                 self.logger.write(format!("Miner {} retired", self.id));
                 println!("Miner {} retired", self.id);   
@@ -184,12 +182,22 @@ impl Miner {
         }
     }
 
-    fn send_command_group(&mut self, group: Vec<usize>, command: Commands, extra_data: Option<u32>) {
-        for miner in group {
+    fn send_gold_pips(&mut self, best_miners: Vec<usize>, total_pips: u32) {
+        let pips_for_each = total_pips / best_miners.len() as u32;
+        let remainder = total_pips % best_miners.len() as u32;
+
+        let mut remainder_count = 0;
+        for miner in best_miners {
+            let mut final_pips = pips_for_each;
+            if remainder_count < remainder {
+                final_pips += 1;
+                remainder_count += 1;
+            }
+
             let send_msg = Message {
                 id: self.id,
-                cmd: command.clone(),
-                extra: extra_data
+                cmd: Commands::TRANSFER,
+                extra: Some(final_pips)
             };
 
             self.other_miners[&miner].send(send_msg).unwrap();
