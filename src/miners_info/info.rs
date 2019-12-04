@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::logger::safe_writer::{SafeWriter};
+//use crate::logger::safe_writer::{SafeWriter};
 
 pub struct MinersInfo {
     info: HashMap<usize, u32>
@@ -25,12 +25,16 @@ impl MinersInfo {
         }
     }
 
-    pub fn log_info(&self, logger: &mut SafeWriter) {
+    pub fn get_all(&self) -> HashMap<usize, u32> {
+        return self.info.clone();
+    }
+
+    /*pub fn log_info(&self, logger: &mut SafeWriter) {
         for (id, value) in self.info.iter() {
             logger.write(format!("Miner {} has {} gold pips", id, value));
             println!("Miner {} has {} gold pips", id, value);
         }
-    }
+    }*/
 
     pub fn get_worst_miners(&self) -> Vec<usize> {
         let mut worst_miners: Vec<usize> = Vec::new();
